@@ -59,3 +59,6 @@ dkms.conf
 *.gcda
 *.gcno
 /*.gcov
+
+# Coverage build output
+build/
