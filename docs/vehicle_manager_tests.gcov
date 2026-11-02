@@ -1,0 +1,147 @@
+        -:    0:Source:tests/test_vehicle_manager.cpp
+        -:    0:Graph:test_vehicle_manager.gcno
+        -:    0:Data:test_vehicle_manager.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:// Unit tests for the Vehicle Manager (issue #5).
+        -:    2:// Build and run from the repo root:
+        -:    3://   g++ -std=c++17 -Wall -Wextra -pedantic tests/test_vehicle_manager.cpp -o test_vehicle_manager.out
+        -:    4://   ./test_vehicle_manager.out
+        -:    5:
+        -:    6:#include <iostream>
+        -:    7:#include <string>
+        -:    8:
+        -:    9:// Pull in the classes from main.cpp without its main() function.
+        -:   10:#define TMS_UNIT_TEST
+        -:   11:#include "../main.cpp"
+        -:   12:
+        -:   13:namespace {
+        -:   14:
+        -:   15:int failures = 0;
+        -:   16:
+       28:   17:void check(bool condition, const std::string& description) {
+       28:   18:    std::cout << (condition ? "  PASS  " : "  FAIL  ") << description << '\n';
+        -:   19:
+       28:   20:    if (!condition) {
+    #####:   21:        ++failures;
+        -:   22:    }
+       28:   23:}
+        -:   24:
+        -:   25:// FR5 entry rule: valid vehicles join the back of a lane in any signal state.
+        1:   26:void testEntry() {
+        1:   27:    std::cout << "FR5 entry rule\n";
+        2:   28:    QueueManager queues(4);
+        1:   29:    VehicleManager vehicles(queues);
+        -:   30:
+        1:   31:    check(vehicles.addVehicle(0, "V1", "car", 0), "V1 added to lane 0");
+        1:   32:    check(vehicles.addVehicle(0, "V2", "bus", 1), "V2 added to lane 0");
+        1:   33:    check(queues.getQueueLength(0) == 2, "lane 0 has 2 vehicles");
+        -:   34:
+        2:   35:    const std::vector<Vehicle> lane0 = queues.snapshot(0);
+        2:   36:    check(lane0.size() == 2 && lane0[0].id == "V1" && lane0[1].id == "V2",
+        1:   37:          "V2 joined behind V1");
+        2:   38:    check(lane0[1].type == "bus" && lane0[1].arrivalTick == 1,
+        1:   39:          "vehicle type and arrival tick are stored");
+        1:   40:}
+        -:   41:
+        -:   42:// FR5 entry rule: invalid vehicles never reach a queue.
+        1:   43:void testRejectedEntry() {
+        1:   44:    std::cout << "FR5 rejected entry\n";
+        2:   45:    QueueManager queues(4);
+        1:   46:    VehicleManager vehicles(queues);
+        -:   47:
+        1:   48:    check(!vehicles.addVehicle(0, "", "car", 0), "empty vehicle ID is rejected");
+        1:   49:    check(!vehicles.addVehicle(0, "V1", "", 0), "empty vehicle type is rejected");
+        1:   50:    check(!vehicles.addVehicle(0, "   ", "car", 0), "blank (spaces only) vehicle ID is rejected");
+        1:   51:    check(!vehicles.addVehicle(0, "V1", " \t ", 0), "blank (spaces only) vehicle type is rejected");
+        1:   52:    check(!vehicles.addVehicle(7, "V1", "car", 0), "invalid lane is rejected");
+        -:   53:
+        1:   54:    vehicles.addVehicle(0, "V1", "car", 0);
+        1:   55:    check(!vehicles.addVehicle(2, "V1", "car", 0), "queued vehicle ID cannot be added twice");
+        -:   56:
+        1:   57:    std::size_t total = 0;
+        5:   58:    for (std::size_t lane = 0; lane < queues.laneCount(); ++lane) {
+        4:   59:        total += queues.getQueueLength(lane);
+        -:   60:    }
+        1:   61:    check(total == 1, "only the one valid vehicle is queued");
+        1:   62:}
+        -:   63:
+        -:   64:// TC-04 (FR5, FR3): a vehicle leaves only once its lane is GREEN.
+        1:   65:void testExitOnlyOnGreen() {
+        1:   66:    std::cout << "TC-04 exit only on GREEN\n";
+        2:   67:    QueueManager queues(4);
+        1:   68:    VehicleManager vehicles(queues);
+        2:   69:    Vehicle out;
+        -:   70:
+        1:   71:    vehicles.addVehicle(1, "V1", "car", 0);
+        -:   72:
+        2:   73:    check(vehicles.moveVehicle(1, SignalState::Red, out) == MoveResult::BlockedBySignal,
+        1:   74:          "move on RED is blocked");
+        1:   75:    check(queues.getQueueLength(1) == 1, "V1 is still queued during RED");
+        -:   76:
+        2:   77:    check(vehicles.moveVehicle(1, SignalState::Yellow, out) == MoveResult::BlockedBySignal,
+        1:   78:          "move on YELLOW is blocked");
+        1:   79:    check(queues.getQueueLength(1) == 1, "V1 is still queued during YELLOW");
+        -:   80:
+        2:   81:    check(vehicles.moveVehicle(1, SignalState::Green, out) == MoveResult::Moved,
+        1:   82:          "move on GREEN succeeds");
+        1:   83:    check(out.id == "V1", "V1 is the vehicle that left");
+        1:   84:    check(queues.getQueueLength(1) == 0, "lane is empty after V1 leaves");
+        -:   85:
+        4:   86:    check(VehicleManager::canLeave(SignalState::Green) &&
+        2:   87:              !VehicleManager::canLeave(SignalState::Yellow) &&
+        1:   88:              !VehicleManager::canLeave(SignalState::Red),
+        1:   89:          "canLeave is true only for GREEN");
+        1:   90:}
+        -:   91:
+        -:   92:// TC-02 (FR2, FR5): vehicles leave through the Vehicle Manager in FIFO order.
+        1:   93:void testExitFifoOrder() {
+        1:   94:    std::cout << "TC-02 exit in FIFO order\n";
+        2:   95:    QueueManager queues(4);
+        1:   96:    VehicleManager vehicles(queues);
+        2:   97:    Vehicle out;
+        -:   98:
+        1:   99:    vehicles.addVehicle(2, "V1", "car", 0);
+        1:  100:    vehicles.addVehicle(2, "V2", "car", 0);
+        1:  101:    vehicles.addVehicle(2, "V3", "car", 0);
+        1:  102:    check(queues.getQueueLength(2) == 3, "length is 3 before any move");
+        -:  103:
+        1:  104:    vehicles.moveVehicle(2, SignalState::Green, out);
+        1:  105:    check(out.id == "V1", "V1 leaves first");
+        1:  106:    check(queues.getQueueLength(2) == 2, "length becomes 2");
+        -:  107:
+        1:  108:    vehicles.moveVehicle(2, SignalState::Green, out);
+        1:  109:    check(out.id == "V2", "V2 leaves second");
+        1:  110:}
+        -:  111:
+        -:  112:// NFR3/SR2: moving from an empty or invalid lane changes nothing.
+        1:  113:void testExitFromEmptyLane() {
+        1:  114:    std::cout << "NFR3 exit from empty or invalid lane\n";
+        2:  115:    QueueManager queues(4);
+        1:  116:    VehicleManager vehicles(queues);
+        2:  117:    Vehicle out;
+        -:  118:
+        2:  119:    check(vehicles.moveVehicle(3, SignalState::Green, out) == MoveResult::QueueEmpty,
+        1:  120:          "GREEN on an empty lane reports QueueEmpty");
+        2:  121:    check(vehicles.moveVehicle(9, SignalState::Green, out) == MoveResult::QueueEmpty,
+        1:  122:          "invalid lane is refused");
+        -:  123:
+        1:  124:    vehicles.addVehicle(0, "V1", "car", 0);
+        2:  125:    check(vehicles.moveVehicle(3, SignalState::Green, out) == MoveResult::QueueEmpty,
+        1:  126:          "GREEN on lane 3 does not take vehicles from lane 0");
+        1:  127:    check(queues.getQueueLength(0) == 1, "lane 0 is unaffected");
+        1:  128:}
+        -:  129:
+        -:  130:} // namespace
+        -:  131:
+        1:  132:int main() {
+        1:  133:    testEntry();
+        1:  134:    testRejectedEntry();
+        1:  135:    testExitOnlyOnGreen();
+        1:  136:    testExitFifoOrder();
+        1:  137:    testExitFromEmptyLane();
+        -:  138:
+        -:  139:    std::cout << '\n'
+        1:  140:              << (failures == 0 ? "All tests passed.\n" : "Some tests failed.\n");
+        1:  141:    return failures == 0 ? 0 : 1;
+        3:  142:}

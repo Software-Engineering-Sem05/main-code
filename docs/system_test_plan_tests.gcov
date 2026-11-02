@@ -1,0 +1,598 @@
+        -:    0:Source:tests/test_plan_cases.cpp
+        -:    0:Graph:test_plan_cases.gcno
+        -:    0:Data:test_plan_cases.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:// System tests for every test case in the Test Plan (TC-01 to TC-12), issue #27.
+        -:    2://
+        -:    3:// Each test drives the real TrafficSimulation menu loop with scripted
+        -:    4:// keyboard input and checks the console output, as described in the Test
+        -:    5:// Plan's procedure (§4.5): build, execute, observe, compare, record.
+        -:    6://
+        -:    7:// Build and run from the repo root:
+        -:    8://   g++ -std=c++14 -O2 -Wall -Wextra tests/test_plan_cases.cpp -o test_plan_cases.exe
+        -:    9://   .\test_plan_cases.exe          (Windows)
+        -:   10://   ./test_plan_cases.exe          (Linux / macOS)
+        -:   11:
+        -:   12:#include <chrono>
+        -:   13:#include <iostream>
+        -:   14:#include <map>
+        -:   15:#include <sstream>
+        -:   16:#include <string>
+        -:   17:#include <vector>
+        -:   18:
+        -:   19:// Pull in the classes from main.cpp without its main() function.
+        -:   20:#define TMS_UNIT_TEST
+        -:   21:#include "../main.cpp"
+        -:   22:
+        -:   23:namespace {
+        -:   24:
+        -:   25:// ---------------------------------------------------------------------------
+        -:   26:// Test bookkeeping
+        -:   27:// ---------------------------------------------------------------------------
+        -:   28:
+        -:   29:int caseFailures = 0;
+        2:   30:std::vector<std::pair<std::string, bool>> summary;
+        -:   31:
+       61:   32:void check(bool condition, const std::string& description) {
+       61:   33:    std::cout << (condition ? "  PASS  " : "  FAIL  ") << description << '\n';
+        -:   34:
+       61:   35:    if (!condition) {
+    #####:   36:        ++caseFailures;
+        -:   37:    }
+       61:   38:}
+        -:   39:
+       12:   40:void beginCase(const std::string& title) {
+       12:   41:    caseFailures = 0;
+       12:   42:    std::cout << '\n' << title << '\n';
+       12:   43:}
+        -:   44:
+       12:   45:void endCase(const std::string& id) {
+       12:   46:    summary.emplace_back(id, caseFailures == 0);
+       12:   47:}
+        -:   48:
+        -:   49:// ---------------------------------------------------------------------------
+        -:   50:// Running the simulation with scripted input
+        -:   51:// ---------------------------------------------------------------------------
+        -:   52:
+       13:   53:std::string runSimulation(const std::string& script) {
+       26:   54:    std::istringstream input(script + "4\n"); // always exit at the end
+       26:   55:    std::ostringstream output;
+        -:   56:
+       13:   57:    std::streambuf* const originalIn = std::cin.rdbuf(input.rdbuf());
+       13:   58:    std::streambuf* const originalOut = std::cout.rdbuf(output.rdbuf());
+        -:   59:
+        -:   60:    {
+       26:   61:        TrafficSimulation simulation;
+       13:   62:        simulation.run();
+        -:   63:    }
+        -:   64:
+       13:   65:    std::cin.rdbuf(originalIn);
+       13:   66:    std::cout.rdbuf(originalOut);
+       26:   67:    return output.str();
+        -:   68:}
+        -:   69:
+        -:   70:// Menu commands, written the way a user would type them.
+     5031:   71:std::string add(int lane, const std::string& id, const std::string& type = "car") {
+     5031:   72:    return "1\n" + std::to_string(lane) + "\n" + id + "\n" + type + "\n";
+        -:   73:}
+        -:   74:
+        4:   75:std::string addRaw(const std::string& laneInput) {
+        4:   76:    return "1\n" + laneInput + "\n";
+        -:   77:}
+        -:   78:
+       57:   79:std::string status() { return "2\n"; }
+        -:   80:
+     6773:   81:std::string advance(int ticks = 1) {
+     6773:   82:    std::string s;
+    13555:   83:    for (int i = 0; i < ticks; ++i) {
+     6782:   84:        s += "3\n";
+        -:   85:    }
+     6773:   86:    return s;
+        -:   87:}
+        -:   88:
+   107566:   89:bool contains(const std::string& text, const std::string& part) {
+   107566:   90:    return text.find(part) != std::string::npos;
+        -:   91:}
+        -:   92:
+        7:   93:std::size_t countOf(const std::string& text, const std::string& part) {
+        7:   94:    std::size_t count = 0;
+       20:   95:    for (std::size_t pos = text.find(part); pos != std::string::npos;
+       13:   96:         pos = text.find(part, pos + part.size())) {
+       13:   97:        ++count;
+        -:   98:    }
+        7:   99:    return count;
+        -:  100:}
+        -:  101:
+        -:  102:// ---------------------------------------------------------------------------
+        -:  103:// Reading the "TRAFFIC STATUS REPORT" screens back into data
+        -:  104:// ---------------------------------------------------------------------------
+        -:  105:
+      456:  106:struct LaneStatus {
+        -:  107:    std::string signal;
+        -:  108:    std::string level;
+        -:  109:    std::size_t vehicles = 0;
+        -:  110:    std::string queue;
+        -:  111:};
+        -:  112:
+      238:  113:struct StatusReport {
+        -:  114:    std::size_t tick = 0;
+        -:  115:    std::map<std::string, LaneStatus> lanes;
+        -:  116:    std::size_t added = 0;
+        -:  117:    std::size_t processed = 0;
+        -:  118:    double averageWait = 0.0;
+        -:  119:};
+        -:  120:
+     1368:  121:std::string valueAfter(const std::string& line, const std::string& label) {
+     1368:  122:    return line.substr(label.size());
+        -:  123:}
+        -:  124:
+       13:  125:std::vector<StatusReport> parseReports(const std::string& log) {
+       13:  126:    std::vector<StatusReport> reports;
+       26:  127:    std::istringstream lines(log);
+       26:  128:    std::string line;
+       26:  129:    std::string lane;
+        -:  130:
+   215127:  131:    while (std::getline(lines, line)) {
+   107557:  132:        if (contains(line, "TRAFFIC STATUS REPORT")) {
+       57:  133:            reports.emplace_back();
+   107500:  134:        } else if (reports.empty()) {
+    60713:  135:            continue;
+    46787:  136:        } else if (line.rfind("Simulation Tick: ", 0) == 0) {
+       57:  137:            reports.back().tick = std::stoul(valueAfter(line, "Simulation Tick: "));
+    46730:  138:        } else if (line.rfind("LANE: ", 0) == 0) {
+      228:  139:            lane = valueAfter(line, "LANE: ");
+    46502:  140:        } else if (line.rfind("Signal State : ", 0) == 0) {
+      228:  141:            reports.back().lanes[lane].signal = valueAfter(line, "Signal State : ");
+    46274:  142:        } else if (line.rfind("Traffic Level: ", 0) == 0) {
+      228:  143:            reports.back().lanes[lane].level = valueAfter(line, "Traffic Level: ");
+    46046:  144:        } else if (line.rfind("Vehicles     : ", 0) == 0) {
+      456:  145:            reports.back().lanes[lane].vehicles =
+      456:  146:                std::stoul(valueAfter(line, "Vehicles     : "));
+    45818:  147:        } else if (line.rfind("Queue        : ", 0) == 0) {
+      228:  148:            reports.back().lanes[lane].queue = valueAfter(line, "Queue        : ");
+    45590:  149:        } else if (line.rfind("Total vehicles added     : ", 0) == 0) {
+       57:  150:            reports.back().added = std::stoul(valueAfter(line, "Total vehicles added     : "));
+    45533:  151:        } else if (line.rfind("Total vehicles processed : ", 0) == 0) {
+      114:  152:            reports.back().processed =
+      114:  153:                std::stoul(valueAfter(line, "Total vehicles processed : "));
+    45476:  154:        } else if (line.rfind("Average waiting time     : ", 0) == 0) {
+      114:  155:            reports.back().averageWait =
+      114:  156:                std::stod(valueAfter(line, "Average waiting time     : "));
+        -:  157:        }
+        -:  158:    }
+        -:  159:
+       26:  160:    return reports;
+        -:  161:}
+        -:  162:
+        2:  163:const std::vector<std::string> laneNames = {"North", "South", "East", "West"};
+        -:  164:
+        6:  165:std::size_t totalQueued(const StatusReport& report) {
+        6:  166:    std::size_t total = 0;
+       30:  167:    for (const auto& lane : report.lanes) {
+       24:  168:        total += lane.second.vehicles;
+        -:  169:    }
+        6:  170:    return total;
+        -:  171:}
+        -:  172:
+        -:  173:// ---------------------------------------------------------------------------
+        -:  174:// TC-01 — FR1, SR1: add a vehicle to a valid lane
+        -:  175:// ---------------------------------------------------------------------------
+        1:  176:void tc01() {
+        1:  177:    beginCase("TC-01 (FR1, SR1) add a vehicle with valid input");
+        2:  178:    const std::string log = runSimulation(add(2, "KA01", "car") + status());
+        2:  179:    const auto reports = parseReports(log);
+        -:  180:
+        2:  181:    check(contains(log, "Vehicle KA01 added to the South lane queue."),
+        1:  182:          "success confirmation is displayed");
+        1:  183:    check(reports.size() == 1, "status report is shown");
+        1:  184:    if (reports.size() == 1) {
+        1:  185:        const StatusReport& r = reports[0];
+        4:  186:        check(r.lanes.at("South").vehicles == 1 &&
+        3:  187:                  r.lanes.at("South").queue == "KA01 (car)",
+        1:  188:              "KA01 is queued in the South lane");
+        1:  189:        check(totalQueued(r) == 1, "no other lane was changed");
+        1:  190:        check(r.added == 1, "statistics count 1 vehicle added");
+        -:  191:    }
+        1:  192:    endCase("TC-01");
+        1:  193:}
+        -:  194:
+        -:  195:// ---------------------------------------------------------------------------
+        -:  196:// TC-02 — FR2, FR5: per-lane FIFO queue, enter and leave
+        -:  197:// ---------------------------------------------------------------------------
+        1:  198:void tc02() {
+        1:  199:    beginCase("TC-02 (FR2, FR5) per-lane FIFO order");
+        2:  200:    const std::string log = runSimulation(add(1, "V1") + add(1, "V2") + add(1, "V3") +
+        4:  201:                                          status() + advance() + status());
+        2:  202:    const auto reports = parseReports(log);
+        -:  203:
+        1:  204:    check(reports.size() == 2, "two status reports are shown");
+        1:  205:    if (reports.size() == 2) {
+        2:  206:        check(reports[0].lanes.at("North").vehicles == 3,
+        1:  207:              "queue length is 3 before removal");
+        2:  208:        check(reports[0].lanes.at("North").queue == "V1 (car) -> V2 (car) -> V3 (car)",
+        1:  209:              "queue order is V1 -> V2 -> V3");
+        2:  210:        check(contains(log, "vehicle V1 (car) moved from the North lane"),
+        1:  211:              "V1 is dequeued first");
+        4:  212:        check(reports[1].lanes.at("North").vehicles == 2 &&
+        3:  213:                  reports[1].lanes.at("North").queue == "V2 (car) -> V3 (car)",
+        1:  214:              "queue length becomes 2 with V2 at the front");
+        -:  215:    }
+        1:  216:    endCase("TC-02");
+        1:  217:}
+        -:  218:
+        -:  219:// ---------------------------------------------------------------------------
+        -:  220:// TC-03 — FR3, FR4: signal states and cycle
+        -:  221:// ---------------------------------------------------------------------------
+        1:  222:void tc03() {
+        1:  223:    beginCase("TC-03 (FR3, FR4) signal cycle Red / Yellow / Green");
+        1:  224:    const int ticks = 20;
+        2:  225:    std::string script = status();
+       21:  226:    for (int t = 0; t < ticks; ++t) {
+       20:  227:        script += advance() + status();
+        -:  228:    }
+        -:  229:
+        2:  230:    const auto reports = parseReports(runSimulation(script));
+        2:  231:    check(reports.size() == static_cast<std::size_t>(ticks + 1),
+        1:  232:          "a status report was captured after every tick");
+        -:  233:
+        1:  234:    bool onlyValidStates = true;
+        1:  235:    bool oneActiveLane = true;
+        1:  236:    bool followsCycle = true;
+        -:  237:
+       22:  238:    for (std::size_t k = 0; k < reports.size(); ++k) {
+        -:  239:        // Expected: each lane is GREEN for 3 ticks, then YELLOW for 1 tick,
+        -:  240:        // then RED while the next lane (North -> South -> East -> West) runs.
+       21:  241:        const std::size_t activeLane = (k / 4) % 4;
+       42:  242:        const std::string activeState = (k % 4 == 3) ? "YELLOW" : "GREEN";
+       21:  243:        int nonRed = 0;
+        -:  244:
+      105:  245:        for (std::size_t i = 0; i < laneNames.size(); ++i) {
+       84:  246:            const std::string& state = reports[k].lanes.at(laneNames[i]).signal;
+        -:  247:
+       84:  248:            if (state != "RED" && state != "YELLOW" && state != "GREEN") {
+    #####:  249:                onlyValidStates = false;
+        -:  250:            }
+       84:  251:            if (state != "RED") {
+       21:  252:                ++nonRed;
+        -:  253:            }
+        -:  254:
+      168:  255:            const std::string expected = (i == activeLane) ? activeState : "RED";
+       84:  256:            if (state != expected) {
+    #####:  257:                followsCycle = false;
+        -:  258:            }
+        -:  259:        }
+        -:  260:
+       21:  261:        if (nonRed != 1) {
+    #####:  262:            oneActiveLane = false;
+        -:  263:        }
+        -:  264:    }
+        -:  265:
+        1:  266:    check(onlyValidStates, "only RED, YELLOW and GREEN are ever shown");
+        1:  267:    check(oneActiveLane, "exactly one lane is GREEN or YELLOW at any time");
+        2:  268:    check(followsCycle,
+        1:  269:          "each lane goes GREEN (3 ticks) -> YELLOW (1 tick) -> RED, in order N, S, E, W");
+        1:  270:    endCase("TC-03");
+        1:  271:}
+        -:  272:
+        -:  273:// ---------------------------------------------------------------------------
+        -:  274:// TC-04 — FR5, FR3: vehicle leaves only when its lane is GREEN
+        -:  275:// ---------------------------------------------------------------------------
+        1:  276:void tc04() {
+        1:  277:    beginCase("TC-04 (FR5, FR3) vehicle waits on RED/YELLOW, leaves on GREEN");
+        -:  278:    // South is RED at the start. North is GREEN for ticks 1-3 and YELLOW
+        -:  279:    // after tick 3; South turns GREEN at tick 4 and moves a vehicle at tick 5.
+        2:  280:    std::string script = add(2, "S1");
+        6:  281:    for (int t = 0; t < 5; ++t) {
+        5:  282:        script += advance() + status();
+        -:  283:    }
+        2:  284:    const std::string log = runSimulation(script);
+        2:  285:    const auto reports = parseReports(log);
+        -:  286:
+        1:  287:    check(reports.size() == 5, "a status report was captured after every tick");
+        1:  288:    if (reports.size() == 5) {
+        1:  289:        bool waitedOnRed = true;
+        4:  290:        for (int k = 0; k < 3; ++k) {
+       15:  291:            waitedOnRed = waitedOnRed && reports[k].lanes.at("South").signal == "RED" &&
+        9:  292:                          reports[k].lanes.at("South").vehicles == 1;
+        -:  293:        }
+        1:  294:        check(waitedOnRed, "S1 stays queued while South is RED (ticks 1-3)");
+        4:  295:        check(reports[2].lanes.at("North").signal == "YELLOW" &&
+        3:  296:                  reports[2].lanes.at("South").vehicles == 1,
+        1:  297:              "S1 stays queued while North is YELLOW");
+        2:  298:        check(reports[3].lanes.at("South").signal == "GREEN",
+        1:  299:              "South turns GREEN on the normal cycle (tick 4)");
+        4:  300:        check(reports[4].lanes.at("South").vehicles == 0 &&
+        3:  301:                  contains(log, "Tick 5: vehicle S1 (car) moved from the South lane"),
+        1:  302:              "S1 leaves once South is GREEN (tick 5)");
+        2:  303:        check(countOf(log, "moved from the South lane") == 1,
+        1:  304:              "S1 left exactly once");
+        -:  305:    }
+        1:  306:    endCase("TC-04");
+        1:  307:}
+        -:  308:
+        -:  309:// ---------------------------------------------------------------------------
+        -:  310:// TC-05 — FR6, NFR2: display checklist
+        -:  311:// ---------------------------------------------------------------------------
+        1:  312:void tc05() {
+        1:  313:    beginCase("TC-05 (FR6, NFR2) status display checklist");
+        -:  314:    const std::string log =
+        2:  315:        runSimulation(add(1, "N1", "car") + add(3, "E1", "bus") + add(3, "E2", "truck") +
+        4:  316:                      advance() + status());
+        2:  317:    const auto reports = parseReports(log);
+        -:  318:
+        1:  319:    check(reports.size() == 1, "status report is shown");
+        1:  320:    if (reports.size() == 1) {
+        1:  321:        const StatusReport& r = reports[0];
+        1:  322:        bool everyLaneListed = true;
+        5:  323:        for (const std::string& name : laneNames) {
+        8:  324:            everyLaneListed = everyLaneListed && r.lanes.count(name) == 1 &&
+        4:  325:                              !r.lanes.at(name).signal.empty();
+        -:  326:        }
+        1:  327:        check(everyLaneListed, "every lane shows its name and signal state");
+        1:  328:        check(r.tick == 1, "current simulation tick is shown");
+        2:  329:        check(r.lanes.at("North").vehicles == 0 && r.lanes.at("North").queue == "Empty",
+        1:  330:              "North count (0) matches state after N1 left");
+        4:  331:        check(r.lanes.at("East").vehicles == 2 &&
+        3:  332:                  r.lanes.at("East").queue == "E1 (bus) -> E2 (truck)",
+        1:  333:              "East count (2) and contents match, with vehicle types");
+        2:  334:        check(r.lanes.at("North").signal == "GREEN" && r.lanes.at("East").signal == "RED",
+        1:  335:              "signal states match the simulation");
+        2:  336:        check(contains(log, "TRAFFIC STATISTICS") && r.added == 3 && r.processed == 1,
+        1:  337:              "statistics section is shown with correct totals");
+        -:  338:    }
+        1:  339:    endCase("TC-05");
+        1:  340:}
+        -:  341:
+        -:  342:// ---------------------------------------------------------------------------
+        -:  343:// TC-06 / TC-07 — FR7: congestion indicator
+        -:  344://
+        -:  345:// The congestion indicator is shown as "Traffic Level" in the status report:
+        -:  346:// LOW (0-2), MEDIUM (3-5), HIGH (more than 5). HIGH means congested, so the
+        -:  347:// congestion threshold is 5 vehicles.
+        -:  348:// ---------------------------------------------------------------------------
+        1:  349:void tc06() {
+        1:  350:    beginCase("TC-06 (FR7) lane above threshold is congested");
+        2:  351:    std::string script;
+        6:  352:    for (int i = 1; i <= 5; ++i) {
+        5:  353:        script += add(2, "C" + std::to_string(i));
+        -:  354:    }
+        1:  355:    script += status() + add(2, "C6") + status();
+        -:  356:
+        2:  357:    const auto reports = parseReports(runSimulation(script));
+        1:  358:    check(reports.size() == 2, "two status reports are shown");
+        1:  359:    if (reports.size() == 2) {
+        4:  360:        check(reports[0].lanes.at("South").vehicles == 5 &&
+        3:  361:                  reports[0].lanes.at("South").level != "HIGH",
+        1:  362:              "exactly at threshold (5) is not congested");
+        4:  363:        check(reports[1].lanes.at("South").vehicles == 6 &&
+        3:  364:                  reports[1].lanes.at("South").level == "HIGH",
+        1:  365:              "one above threshold (6) is congested (HIGH)");
+        2:  366:        check(reports[1].lanes.at("North").level == "LOW",
+        1:  367:              "other lanes are not reported congested");
+        -:  368:    }
+        1:  369:    endCase("TC-06");
+        1:  370:}
+        -:  371:
+        1:  372:void tc07() {
+        1:  373:    beginCase("TC-07 (FR7) lane below threshold is not congested");
+        2:  374:    const auto reports = parseReports(runSimulation(add(4, "W1") + add(4, "W2") + status()));
+        -:  375:
+        1:  376:    check(reports.size() == 1, "status report is shown");
+        1:  377:    if (reports.size() == 1) {
+        4:  378:        check(reports[0].lanes.at("West").vehicles == 2 &&
+        3:  379:                  reports[0].lanes.at("West").level == "LOW",
+        1:  380:              "2 vehicles: West is reported LOW (not congested)");
+        -:  381:    }
+        1:  382:    endCase("TC-07");
+        1:  383:}
+        -:  384:
+        -:  385:// ---------------------------------------------------------------------------
+        -:  386:// TC-08 — FR8: statistics
+        -:  387:// ---------------------------------------------------------------------------
+        1:  388:void tc08() {
+        1:  389:    beginCase("TC-08 (FR8) traffic statistics");
+        -:  390:    // V1 and V2 join North at tick 0; V1 leaves at tick 1 (waited 1) and
+        -:  391:    // V2 at tick 2 (waited 2), so the average wait is 1.5 ticks.
+        -:  392:    const std::string log =
+        2:  393:        runSimulation(add(1, "V1") + add(1, "V2") + add(3, "E1") + advance(2) + status());
+        2:  394:    const auto reports = parseReports(log);
+        -:  395:
+        1:  396:    check(reports.size() == 1, "status report is shown");
+        1:  397:    if (reports.size() == 1) {
+        1:  398:        const StatusReport& r = reports[0];
+        1:  399:        check(r.added == 3, "vehicles added = 3 (matches add commands)");
+        2:  400:        check(r.processed == 2 && countOf(log, " moved from the ") == 2,
+        1:  401:              "vehicles processed = 2 (matches move events)");
+        4:  402:        check(contains(log, "V1 (car) moved from the North lane after waiting 1 tick(s)") &&
+        3:  403:                  contains(log, "V2 (car) moved from the North lane after waiting 2 tick(s)"),
+        1:  404:              "per-vehicle waiting times are 1 and 2 ticks");
+        1:  405:        check(r.averageWait == 1.5, "average waiting time = 1.5 ticks");
+        2:  406:        check(r.lanes.at("East").vehicles == 1 && r.lanes.at("North").vehicles == 0,
+        1:  407:              "queue lengths are consistent with added minus processed");
+        -:  408:    }
+        1:  409:    endCase("TC-08");
+        1:  410:}
+        -:  411:
+        -:  412:// ---------------------------------------------------------------------------
+        -:  413:// TC-09 — NFR1: representative workload
+        -:  414:// (tests/test_performance.cpp runs a larger 20,000 / 200,000 vehicle version)
+        -:  415:// ---------------------------------------------------------------------------
+        1:  416:void tc09() {
+        1:  417:    beginCase("TC-09 (NFR1) representative workload");
+        1:  418:    const std::size_t vehicleCount = 5000;
+        2:  419:    std::string script;
+     5001:  420:    for (std::size_t i = 0; i < vehicleCount; ++i) {
+     5000:  421:        script += add(static_cast<int>(i % 4) + 1, "P" + std::to_string(i));
+        -:  422:    }
+        1:  423:    const std::size_t ticks = (vehicleCount / 12 + 1) * 16 + 64;
+     6737:  424:    for (std::size_t t = 0; t < ticks; ++t) {
+     6736:  425:        script += advance();
+     6736:  426:        if (t % 500 == 0) {
+       14:  427:            script += status();
+        -:  428:        }
+        -:  429:    }
+        1:  430:    script += status();
+        -:  431:
+        1:  432:    const auto start = std::chrono::steady_clock::now();
+        2:  433:    const std::string log = runSimulation(script);
+        2:  434:    const double ms = std::chrono::duration<double, std::milli>(
+        3:  435:                          std::chrono::steady_clock::now() - start).count();
+        2:  436:    const auto reports = parseReports(log);
+        -:  437:
+        1:  438:    check(contains(log, "Simulation ended."), "every command completed; program exited normally");
+        3:  439:    check(!reports.empty() && reports.back().added == vehicleCount &&
+        1:  440:              reports.back().processed == vehicleCount,
+        1:  441:          "all 5,000 vehicles added and processed");
+        1:  442:    check(!reports.empty() && totalQueued(reports.back()) == 0, "all lanes empty at the end");
+        1:  443:    std::cout << "        " << vehicleCount << " vehicles, " << ticks << " ticks in " << ms
+        1:  444:              << " ms\n";
+        1:  445:    endCase("TC-09");
+        1:  446:}
+        -:  447:
+        -:  448:// ---------------------------------------------------------------------------
+        -:  449:// TC-10 — NFR3, SR2: empty-queue guard and integrity
+        -:  450:// ---------------------------------------------------------------------------
+        1:  451:void tc10() {
+        1:  452:    beginCase("TC-10 (NFR3, SR2) empty-queue operation and integrity");
+        -:  453:    // Tick 1: North is GREEN with an empty queue (attempted dequeue on empty).
+        -:  454:    // Then add A, B, C to North and let ticks 2 and 3 move A and B.
+        2:  455:    const std::string log = runSimulation(status() + advance() + status() + add(1, "A") +
+        4:  456:                                          add(1, "B") + add(1, "C") + status() + advance() +
+        4:  457:                                          status() + advance() + status());
+        2:  458:    const auto reports = parseReports(log);
+        -:  459:
+        1:  460:    check(reports.size() == 5, "five status reports are shown");
+        1:  461:    if (reports.size() == 5) {
+        2:  462:        check(contains(log, "Tick 1: North lane has a green signal but no vehicles to process."),
+        1:  463:              "move on an empty queue is guarded with a message");
+        2:  464:        check(totalQueued(reports[1]) == 0 && reports[1].processed == 0,
+        1:  465:              "guarded operation changed nothing");
+        2:  466:        check(reports[2].lanes.at("North").queue == "A (car) -> B (car) -> C (car)",
+        1:  467:              "after adding: A -> B -> C");
+        2:  468:        check(reports[3].lanes.at("North").queue == "B (car) -> C (car)",
+        1:  469:              "after one move: B -> C");
+        1:  470:        check(reports[4].lanes.at("North").queue == "C (car)", "after two moves: C");
+        3:  471:        check(reports[4].added == 3 && reports[4].processed == 2 &&
+        1:  472:                  totalQueued(reports[4]) == 1,
+        1:  473:              "none lost or duplicated (3 added = 2 processed + 1 queued)");
+        -:  474:    }
+        1:  475:    endCase("TC-10");
+        1:  476:}
+        -:  477:
+        -:  478:// ---------------------------------------------------------------------------
+        -:  479:// TC-11 — SR1, SO2: invalid input is rejected
+        -:  480:// ---------------------------------------------------------------------------
+        1:  481:void tc11() {
+        1:  482:    beginCase("TC-11 (SR1, SO2) invalid input is rejected");
+        -:  483:    const std::string script =
+        2:  484:        add(1, "OK1") +                          // one valid vehicle
+        4:  485:        addRaw("0") +                            // lane below range
+        4:  486:        addRaw("5") +                            // lane above range
+        4:  487:        addRaw("abc") + "1.5\n" + "-1\n" +       // not a number, then not an integer, then negative
+        2:  488:        "1\n2\n\n" +                             // empty vehicle ID
+        2:  489:        "1\n2\n   \n" +                          // blank vehicle ID (spaces only)
+        2:  490:        "1\n2\nKA09\n\n" +                       // empty vehicle type
+        2:  491:        "1\n2\nKA10\n   \n" +                    // blank vehicle type (spaces only)
+        -:  492:        "1\n3\nOK1\n" +                         // duplicate vehicle ID (rejected before type)
+        4:  493:        status();
+        -:  494:
+        2:  495:    const std::string log = runSimulation(script);
+        2:  496:    const auto reports = parseReports(log);
+        -:  497:
+        2:  498:    check(countOf(log, "Invalid lane. Vehicle was not added.") == 3,
+        1:  499:          "lane 0, lane 5 and lane -1 are rejected with an error");
+        2:  500:    check(countOf(log, "Enter a valid number.") == 2,
+        1:  501:          "non-numeric lane input ('abc', '1.5') is rejected");
+        2:  502:    check(countOf(log, "Vehicle ID cannot be empty.") == 2,
+        1:  503:          "empty and blank (spaces only) vehicle IDs are rejected");
+        2:  504:    check(countOf(log, "Vehicle type cannot be empty.") == 2,
+        1:  505:          "empty and blank (spaces only) vehicle types are rejected");
+        2:  506:    check(contains(log, "That vehicle ID has already been used."),
+        1:  507:          "duplicate vehicle ID is rejected");
+        1:  508:    check(countOf(log, " added to the ") == 1, "only the one valid vehicle was added");
+        -:  509:
+        1:  510:    if (reports.size() == 1) {
+        1:  511:        const StatusReport& r = reports[0];
+        3:  512:        check(totalQueued(r) == 1 && r.lanes.at("North").queue == "OK1 (car)" &&
+        1:  513:                  r.added == 1,
+        1:  514:              "no queue was modified by invalid input");
+        -:  515:    } else {
+    #####:  516:        check(false, "status report is shown");
+        -:  517:    }
+        1:  518:    endCase("TC-11");
+        1:  519:}
+        -:  520:
+        -:  521:// ---------------------------------------------------------------------------
+        -:  522:// TC-12 — SO1: consistency across mixed valid and invalid operations
+        -:  523:// ---------------------------------------------------------------------------
+        1:  524:void tc12() {
+        1:  525:    beginCase("TC-12 (SO1) mixed valid and invalid operations");
+        -:  526:    const std::string mixed =
+        2:  527:        add(1, "N1") + addRaw("9") + add(2, "S1") + "1\n2\n\n" +  // valid, bad lane, valid, empty ID
+        4:  528:        advance() + "1\n1\nN1\n" + "7\n" +                      // tick 1, duplicate ID, bad menu option
+        4:  529:        add(1, "N2") + "1\nxyz\n9\n" + "1\n3\nE1\n  \n" +          // valid, non-numeric then bad lane, blank type
+        4:  530:        advance(4) + add(3, "E1") + advance(2);                   // ticks 2-5, valid, ticks 6-7
+        -:  531:
+        -:  532:    const std::string validOnly =
+        2:  533:        add(1, "N1") + add(2, "S1") + advance() + add(1, "N2") + advance(4) + add(3, "E1") +
+        4:  534:        advance(2);
+        -:  535:
+        2:  536:    const auto mixedReports = parseReports(runSimulation(mixed + status()));
+        2:  537:    const auto validReports = parseReports(runSimulation(validOnly + status()));
+        -:  538:
+        1:  539:    check(mixedReports.size() == 1 && validReports.size() == 1, "both runs show a final report");
+        1:  540:    if (mixedReports.size() == 1 && validReports.size() == 1) {
+        1:  541:        const StatusReport& m = mixedReports[0];
+        1:  542:        const StatusReport& v = validReports[0];
+        -:  543:
+        1:  544:        bool lanesMatch = true;
+        5:  545:        for (const std::string& name : laneNames) {
+        4:  546:            const LaneStatus& a = m.lanes.at(name);
+        4:  547:            const LaneStatus& b = v.lanes.at(name);
+       12:  548:            lanesMatch = lanesMatch && a.signal == b.signal && a.vehicles == b.vehicles &&
+       12:  549:                         a.queue == b.queue && a.level == b.level;
+        -:  550:        }
+        -:  551:
+        1:  552:        check(m.tick == v.tick, "tick count matches the valid-only run");
+        1:  553:        check(lanesMatch, "every lane's signal, queue and count match the valid-only run");
+        3:  554:        check(m.added == v.added && m.processed == v.processed &&
+        1:  555:                  m.averageWait == v.averageWait,
+        1:  556:              "statistics match the valid-only run");
+        2:  557:        check(m.added == 4 && m.processed + totalQueued(m) == 4,
+        1:  558:              "4 valid vehicles: none lost or duplicated");
+        -:  559:    }
+        1:  560:    endCase("TC-12");
+        1:  561:}
+        -:  562:
+        -:  563:} // namespace
+        -:  564:
+        1:  565:int main() {
+        1:  566:    std::cout << "Traffic Management System - Test Plan execution (TC-01 to TC-12)\n";
+        -:  567:
+        1:  568:    tc01();
+        1:  569:    tc02();
+        1:  570:    tc03();
+        1:  571:    tc04();
+        1:  572:    tc05();
+        1:  573:    tc06();
+        1:  574:    tc07();
+        1:  575:    tc08();
+        1:  576:    tc09();
+        1:  577:    tc10();
+        1:  578:    tc11();
+        1:  579:    tc12();
+        -:  580:
+        1:  581:    std::cout << "\n==================== SUMMARY ====================\n";
+        1:  582:    int failed = 0;
+       13:  583:    for (const auto& result : summary) {
+       12:  584:        std::cout << "  " << result.first << "  " << (result.second ? "PASS" : "FAIL") << '\n';
+       12:  585:        if (!result.second) {
+    #####:  586:            ++failed;
+        -:  587:        }
+        -:  588:    }
+        1:  589:    std::cout << "=================================================\n"
+        2:  590:              << summary.size() - failed << " of " << summary.size() << " test cases passed.\n";
+        -:  591:
+        1:  592:    return failed == 0 ? 0 : 1;
+        3:  593:}

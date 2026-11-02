@@ -55,3 +55,7 @@ dkms.conf
 *.dwo
 
 .vscode
+# GCC coverage generated files
+*.gcda
+*.gcno
+/*.gcov

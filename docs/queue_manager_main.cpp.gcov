@@ -1,0 +1,496 @@
+        -:    0:Source:main.cpp
+        -:    0:Graph:test_queue_manager.gcno
+        -:    0:Data:test_queue_manager.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:
+        -:    2:#include <array>
+        -:    3:#include <cstddef>
+        -:    4:#include <deque>
+        -:    5:#include <iostream>
+        -:    6:#include <sstream>
+        -:    7:#include <string>
+        -:    8:#include <unordered_set>
+        -:    9:#include <vector>
+        -:   10:
+        -:   11:// A simulated vehicle (SRS §1.3).
+       54:   12:struct Vehicle {
+        -:   13:    std::string id;
+        -:   14:    std::string type;
+        -:   15:    std::size_t arrivalTick;
+        -:   16:};
+        -:   17:
+        -:   18:// Queue Manager — Data Structure Layer (SADS §2, §4).
+        -:   19://
+        -:   20:// Owns one FIFO queue per lane and is the only component allowed to change
+        -:   21:// queue contents. Every operation that could corrupt queue state is refused
+        -:   22:// instead of attempted (SADS §10):
+        -:   23://   - unknown lane ID          -> rejected, nothing changes
+        -:   24://   - dequeue on empty queue   -> returns false, nothing changes
+        -:   25://   - vehicle ID already used   -> rejected, so a vehicle is never duplicated
+        -:   26://
+        -:   27:// Requirements: FR2 (maintain queues), FR5 (entry/exit), FR7 (queue length
+        -:   28:// for congestion), NFR1 (O(1) enqueue/dequeue/length), NFR3 and SR2
+        -:   29:// (no loss, duplication or corruption of vehicles).
+        5:   30:class QueueManager {
+        -:   31:public:
+        5:   32:    explicit QueueManager(std::size_t laneCount) : queues_(laneCount) {}
+        -:   33:
+        5:   34:    std::size_t laneCount() const { return queues_.size(); }
+        -:   35:
+       44:   36:    bool isValidLane(std::size_t laneId) const {
+       44:   37:        return laneId < queues_.size();
+        -:   38:    }
+        -:   39:
+        -:   40:    // Adds the vehicle to the back of the lane's queue.
+        -:   41:    // Returns false (and changes nothing) for an invalid lane, an empty ID,
+        -:   42:    // or a vehicle ID that has already been admitted to the system.
+       15:   43:    bool enqueue(std::size_t laneId, const Vehicle& vehicle) {
+       28:   44:        if (!isValidLane(laneId) || vehicle.id.empty() ||
+       13:   45:            vehicleIds_.count(vehicle.id) != 0) {
+        5:   46:            return false;
+        -:   47:        }
+        -:   48:
+       10:   49:        queues_[laneId].push_back(vehicle);
+       10:   50:        vehicleIds_.insert(vehicle.id);
+       10:   51:        return true;
+        -:   52:    }
+        -:   53:
+        -:   54:    // Removes the front vehicle of the lane's queue and copies it into
+        -:   55:    // `out`. Returns false (and changes nothing) for an invalid lane or an
+        -:   56:    // empty queue.
+        9:   57:    bool dequeue(std::size_t laneId, Vehicle& out) {
+        9:   58:        if (!isValidLane(laneId) || queues_[laneId].empty()) {
+        3:   59:            return false;
+        -:   60:        }
+        -:   61:
+        6:   62:        out = queues_[laneId].front();
+        6:   63:        queues_[laneId].pop_front();
+        6:   64:        return true;
+        -:   65:    }
+        -:   66:
+        -:   67:    // Copies the front vehicle into `out` without removing it.
+        -:   68:    // Returns false for an invalid lane or an empty queue.
+        2:   69:    bool peekFront(std::size_t laneId, Vehicle& out) const {
+        2:   70:        if (!isValidLane(laneId) || queues_[laneId].empty()) {
+        1:   71:            return false;
+        -:   72:        }
+        -:   73:
+        1:   74:        out = queues_[laneId].front();
+        1:   75:        return true;
+        -:   76:    }
+        -:   77:
+        -:   78:    // Number of vehicles waiting in the lane (0 for an invalid lane).
+       17:   79:    std::size_t getQueueLength(std::size_t laneId) const {
+       17:   80:        return isValidLane(laneId) ? queues_[laneId].size() : 0;
+        -:   81:    }
+        -:   82:
+        4:   83:    bool isEmpty(std::size_t laneId) const {
+        4:   84:        return getQueueLength(laneId) == 0;
+        -:   85:    }
+        -:   86:
+        -:   87:    // Read-only, front-to-back copy of a lane's queue for display.
+        -:   88:    // The internal storage itself is never exposed (SR2).
+        1:   89:    std::vector<Vehicle> snapshot(std::size_t laneId) const {
+        1:   90:        if (!isValidLane(laneId)) {
+    #####:   91:            return {};
+        -:   92:        }
+        -:   93:
+        1:   94:        return {queues_[laneId].begin(), queues_[laneId].end()};
+        -:   95:    }
+        -:   96:
+        -:   97:private:
+        -:   98:    std::vector<std::deque<Vehicle>> queues_;
+        -:   99:    std::unordered_set<std::string> vehicleIds_;
+        -:  100:};
+        -:  101:
+        -:  102:enum class SignalState {
+        -:  103:    Red,
+        -:  104:    Yellow,
+        -:  105:    Green
+        -:  106:};
+        -:  107:
+        -:  108:// Returns the text without leading/trailing spaces, tabs or line endings.
+        -:  109:// Used so that input made only of spaces is treated as empty (SR1).
+        -:  110:inline std::string trimmed(const std::string& text) {
+        -:  111:    const char* const whitespace = " \t\r\n";
+        -:  112:    const std::size_t first = text.find_first_not_of(whitespace);
+        -:  113:
+        -:  114:    if (first == std::string::npos) {
+        -:  115:        return "";
+        -:  116:    }
+        -:  117:
+        -:  118:    const std::size_t last = text.find_last_not_of(whitespace);
+        -:  119:    return text.substr(first, last - first + 1);
+        -:  120:}
+        -:  121:
+        -:  122:struct Lane {
+        -:  123:    std::string name;
+        -:  124:    SignalState signalState = SignalState::Red;
+        -:  125:};
+        -:  126:
+        -:  127:// Vehicle Manager — Traffic Management Layer (SADS §4).
+        -:  128://
+        -:  129:// Creates vehicles and moves them into and out of lane queues according to
+        -:  130:// the traffic rules (FR1, FR5). All queue changes go through the Queue
+        -:  131:// Manager, so its integrity checks (SR2, NFR3) always apply.
+        -:  132://
+        -:  133:// Traffic rules:
+        -:  134://   Entry: a valid vehicle may join a lane in any signal state. It always
+        -:  135://          joins the back of that lane's queue.
+        -:  136://   Exit:  only the front vehicle of a lane may leave, and only while that
+        -:  137://          lane's signal is GREEN. On RED or YELLOW it stays queued (TC-04).
+        -:  138:enum class MoveResult {
+        -:  139:    Moved,           // front vehicle left the lane
+        -:  140:    BlockedBySignal, // lane is RED or YELLOW, nothing changed
+        -:  141:    QueueEmpty       // lane is GREEN but has no vehicles, nothing changed
+        -:  142:};
+        -:  143:
+        -:  144:class VehicleManager {
+        -:  145:public:
+        -:  146:    explicit VehicleManager(QueueManager& queues) : queues_(queues) {}
+        -:  147:
+        -:  148:    // Entry rule. Creates the vehicle and adds it to the back of the lane.
+        -:  149:    // Returns false (and changes nothing) for an empty ID or type, an
+        -:  150:    // invalid lane, or an ID that is already queued.
+        -:  151:    bool addVehicle(std::size_t laneId, const std::string& vehicleId,
+        -:  152:                    const std::string& type, std::size_t arrivalTick) {
+        -:  153:        if (trimmed(vehicleId).empty() || trimmed(type).empty()) {
+        -:  154:            return false;
+        -:  155:        }
+        -:  156:
+        -:  157:        return queues_.enqueue(laneId, Vehicle{vehicleId, type, arrivalTick});
+        -:  158:    }
+        -:  159:
+        -:  160:    // Exit rule: vehicles may only leave on GREEN.
+        -:  161:    static bool canLeave(SignalState laneSignal) {
+        -:  162:        return laneSignal == SignalState::Green;
+        -:  163:    }
+        -:  164:
+        -:  165:    // Moves the front vehicle out of the lane if the traffic rules allow it.
+        -:  166:    // On MoveResult::Moved, `out` holds the vehicle that left.
+        -:  167:    MoveResult moveVehicle(std::size_t laneId, SignalState laneSignal,
+        -:  168:                           Vehicle& out) {
+        -:  169:        if (!canLeave(laneSignal)) {
+        -:  170:            return MoveResult::BlockedBySignal;
+        -:  171:        }
+        -:  172:
+        -:  173:        if (!queues_.dequeue(laneId, out)) {
+        -:  174:            return MoveResult::QueueEmpty;
+        -:  175:        }
+        -:  176:
+        -:  177:        return MoveResult::Moved;
+        -:  178:    }
+        -:  179:
+        -:  180:private:
+        -:  181:    QueueManager& queues_;
+        -:  182:};
+        -:  183:
+        -:  184:class TrafficSimulation {
+        -:  185:public:
+        -:  186:    TrafficSimulation()
+        -:  187:        : lanes_{{
+        -:  188:              {"North", SignalState::Green},
+        -:  189:              {"South", SignalState::Red},
+        -:  190:              {"East", SignalState::Red},
+        -:  191:              {"West", SignalState::Red}
+        -:  192:          }},
+        -:  193:          queues_(lanes_.size()),
+        -:  194:          vehicles_(queues_) {}
+        -:  195:
+        -:  196:    void run() {
+        -:  197:        std::cout << "Traffic Management System (Simulation)\n";
+        -:  198:
+        -:  199:        bool running = true;
+        -:  200:
+        -:  201:        while (running) {
+        -:  202:            printMenu();
+        -:  203:            const int choice = readInteger("Choose an option: ");
+        -:  204:
+        -:  205:            switch (choice) {
+        -:  206:            case 1:
+        -:  207:                addVehicle();
+        -:  208:                break;
+        -:  209:            case 2:
+        -:  210:                showStatus();
+        -:  211:                break;
+        -:  212:            case 3:
+        -:  213:                advanceSimulation();
+        -:  214:                break;
+        -:  215:            case 4:
+        -:  216:                running = false;
+        -:  217:                break;
+        -:  218:            default:
+        -:  219:                std::cout << "Please choose an option from 1 to 4.\n";
+        -:  220:            }
+        -:  221:        }
+        -:  222:
+        -:  223:        std::cout << "Simulation ended.\n";
+        -:  224:    }
+        -:  225:
+        -:  226:private:
+        -:  227:    static const char* signalStateName(SignalState state) {
+        -:  228:        switch (state) {
+        -:  229:        case SignalState::Red:
+        -:  230:            return "RED";
+        -:  231:        case SignalState::Yellow:
+        -:  232:            return "YELLOW";
+        -:  233:        case SignalState::Green:
+        -:  234:            return "GREEN";
+        -:  235:        }
+        -:  236:
+        -:  237:        return "UNKNOWN";
+        -:  238:    }
+        -:  239:
+        -:  240:    std::array<Lane, 4> lanes_;
+        -:  241:    QueueManager queues_;
+        -:  242:    VehicleManager vehicles_;
+        -:  243:    std::unordered_set<std::string> vehicleIds_;
+        -:  244:    std::size_t greenLane_ = 0;
+        -:  245:    std::size_t tick_ = 0;
+        -:  246:    std::size_t greenTicks_ = 0;
+        -:  247:    static constexpr std::size_t GREEN_DURATION_TICKS = 3;
+        -:  248:    
+        -:  249:    std::size_t vehiclesAdded_ = 0;
+        -:  250:    std::size_t vehiclesProcessed_ = 0;
+        -:  251:    std::size_t totalWaitingTime_ = 0;
+        -:  252:
+        -:  253:    static void printMenu() {
+        -:  254:        std::cout << "\n1. Add vehicle\n"
+        -:  255:                  << "2. View traffic status\n"
+        -:  256:                  << "3. Advance simulation\n"
+        -:  257:                  << "4. Exit\n";
+        -:  258:    }
+        -:  259:
+        -:  260:    static int readInteger(const std::string& prompt) {
+        -:  261:        while (true) {
+        -:  262:            std::cout << prompt;
+        -:  263:
+        -:  264:            std::string input;
+        -:  265:
+        -:  266:            if (!std::getline(std::cin, input)) {
+        -:  267:                return 4;
+        -:  268:            }
+        -:  269:
+        -:  270:            std::istringstream stream(input);
+        -:  271:            int value = 0;
+        -:  272:            char extra = '\0';
+        -:  273:
+        -:  274:            if (stream >> value && !(stream >> extra)) {
+        -:  275:                return value;
+        -:  276:            }
+        -:  277:
+        -:  278:            std::cout << "Enter a valid number.\n";
+        -:  279:        }
+        -:  280:    }
+        -:  281:
+        -:  282:    void addVehicle() {
+        -:  283:        std::cout << "\nSelect a lane:\n";
+        -:  284:
+        -:  285:        for (std::size_t i = 0; i < lanes_.size(); ++i) {
+        -:  286:            std::cout << i + 1 << ". " << lanes_[i].name << '\n';
+        -:  287:        }
+        -:  288:
+        -:  289:        const int laneNumber = readInteger("Lane number: ");
+        -:  290:
+        -:  291:        if (laneNumber < 1 ||
+        -:  292:            static_cast<std::size_t>(laneNumber) > lanes_.size()) {
+        -:  293:            std::cout << "Invalid lane. Vehicle was not added.\n";
+        -:  294:            return;
+        -:  295:        }
+        -:  296:
+        -:  297:        std::string id;
+        -:  298:        std::cout << "Vehicle ID: ";
+        -:  299:
+        -:  300:        if (!std::getline(std::cin, id)) {
+        -:  301:            return;
+        -:  302:        }
+        -:  303:
+        -:  304:        id = trimmed(id);
+        -:  305:
+        -:  306:        if (id.empty()) {
+        -:  307:            std::cout << "Vehicle ID cannot be empty. Vehicle was not added.\n";
+        -:  308:            return;
+        -:  309:        }
+        -:  310:
+        -:  311:        if (vehicleIds_.count(id) != 0) {
+        -:  312:            std::cout << "That vehicle ID has already been used. "
+        -:  313:                      << "Vehicle was not added.\n";
+        -:  314:            return;
+        -:  315:        }
+        -:  316:
+        -:  317:        std::string type;
+        -:  318:        std::cout << "Vehicle type: ";
+        -:  319:
+        -:  320:        if (!std::getline(std::cin, type)) {
+        -:  321:            return;
+        -:  322:        }
+        -:  323:
+        -:  324:        type = trimmed(type);
+        -:  325:
+        -:  326:        if (type.empty()) {
+        -:  327:            std::cout << "Vehicle type cannot be empty. Vehicle was not added.\n";
+        -:  328:            return;
+        -:  329:        }
+        -:  330:
+        -:  331:        const std::size_t laneId = static_cast<std::size_t>(laneNumber - 1);
+        -:  332:        const Lane& lane = lanes_[laneId];
+        -:  333:
+        -:  334:        if (!vehicles_.addVehicle(laneId, id, type, tick_)) {
+        -:  335:            std::cout << "Vehicle could not be queued. Vehicle was not added.\n";
+        -:  336:            return;
+        -:  337:        }
+        -:  338:
+        -:  339:        vehicleIds_.insert(id);
+        -:  340:        ++vehiclesAdded_;
+        -:  341:
+        -:  342:        std::cout << "Vehicle " << id << " added to the "
+        -:  343:                  << lane.name << " lane queue.\n";
+        -:  344:    }
+        -:  345:
+        -:  346:    void showStatus() const {
+        -:  347:    std::cout << "\n";
+        -:  348:    std::cout << "========================================\n";
+        -:  349:    std::cout << "          TRAFFIC STATUS REPORT         \n";
+        -:  350:    std::cout << "========================================\n";
+        -:  351:    std::cout << "Simulation Tick: " << tick_ << "\n";
+        -:  352:
+        -:  353:    for (std::size_t i = 0; i < lanes_.size(); ++i) {
+        -:  354:        const Lane& lane = lanes_[i];
+        -:  355:
+        -:  356:        std::cout << "\n----------------------------------------\n";
+        -:  357:        std::cout << "LANE: " << lane.name << "\n";
+        -:  358:        std::cout << "----------------------------------------\n";
+        -:  359:
+        -:  360:        std::cout << "Signal State : "
+        -:  361:                  << signalStateName(lane.signalState) << "\n";
+        -:  362:
+        -:  363:        const std::size_t queueLength = queues_.getQueueLength(i);
+        -:  364:        // Determine traffic congestion level for this lane.
+        -:  365:        std::string trafficLevel;
+        -:  366:
+        -:  367:        if (queueLength <= 2) {
+        -:  368:            trafficLevel = "LOW";
+        -:  369:        } else if (queueLength <= 5) {
+        -:  370:            trafficLevel = "MEDIUM";
+        -:  371:        } else {
+        -:  372:            trafficLevel = "HIGH";
+        -:  373:        }
+        -:  374:
+        -:  375:std::cout << "Traffic Level: "
+        -:  376:          << trafficLevel << "\n";
+        -:  377:        std::cout << "Vehicles     : " << queueLength << "\n";
+        -:  378:        std::cout << "Queue        : ";
+        -:  379:
+        -:  380:        if (queues_.isEmpty(i)) {
+        -:  381:            std::cout << "Empty";
+        -:  382:        } else {
+        -:  383:            bool first = true;
+        -:  384:
+        -:  385:            for (const Vehicle& vehicle : queues_.snapshot(i)) {
+        -:  386:                if (!first) {
+        -:  387:                    std::cout << " -> ";
+        -:  388:                }
+        -:  389:
+        -:  390:                std::cout << vehicle.id << " (" << vehicle.type << ")";
+        -:  391:                first = false;
+        -:  392:            }
+        -:  393:        }
+        -:  394:
+        -:  395:        std::cout << "\n";
+        -:  396:    }
+        -:  397:
+        -:  398:    const double averageWaitingTime =
+        -:  399:        vehiclesProcessed_ == 0
+        -:  400:            ? 0.0
+        -:  401:            : static_cast<double>(totalWaitingTime_) /
+        -:  402:                  vehiclesProcessed_;
+        -:  403:
+        -:  404:    std::cout << "\n";
+        -:  405:    std::cout << "========================================\n";
+        -:  406:    std::cout << "          TRAFFIC STATISTICS            \n";
+        -:  407:    std::cout << "========================================\n";
+        -:  408:    std::cout << "Total vehicles added     : "
+        -:  409:              << vehiclesAdded_ << "\n";
+        -:  410:    std::cout << "Total vehicles processed : "
+        -:  411:              << vehiclesProcessed_ << "\n";
+        -:  412:    std::cout << "Average waiting time     : "
+        -:  413:              << averageWaitingTime << " tick(s)\n";
+        -:  414:    std::cout << "========================================\n";
+        -:  415:}
+        -:  416:
+        -:  417:void advanceSimulation() {
+        -:  418:    ++tick_;
+        -:  419:
+        -:  420:    Lane& lane = lanes_[greenLane_];
+        -:  421:
+        -:  422:    // If the current lane is Yellow, finish its transition.
+        -:  423:    if (lane.signalState == SignalState::Yellow) {
+        -:  424:        lane.signalState = SignalState::Red;
+        -:  425:
+        -:  426:        std::cout << lane.name
+        -:  427:                  << " lane signal changed to RED.\n";
+        -:  428:
+        -:  429:        // Activate the next lane.
+        -:  430:        greenLane_ = (greenLane_ + 1) % lanes_.size();
+        -:  431:
+        -:  432:        lanes_[greenLane_].signalState = SignalState::Green;
+        -:  433:        greenTicks_ = 0;
+        -:  434:
+        -:  435:        std::cout << "Signal changed to "
+        -:  436:                  << lanes_[greenLane_].name
+        -:  437:                  << " lane (GREEN).\n";
+        -:  438:
+        -:  439:        return;
+        -:  440:    }
+        -:  441:
+        -:  442:    // Process a vehicle only when the current lane is Green.
+        -:  443:    // The Vehicle Manager enforces the exit rule (FR5).
+        -:  444:    Vehicle vehicle;
+        -:  445:    const MoveResult result =
+        -:  446:        vehicles_.moveVehicle(greenLane_, lane.signalState, vehicle);
+        -:  447:
+        -:  448:    if (result == MoveResult::BlockedBySignal) {
+        -:  449:        std::cout << "Tick " << tick_ << ": "
+        -:  450:                  << lane.name
+        -:  451:                  << " lane is not green. Vehicles stay queued.\n";
+        -:  452:    } else if (result == MoveResult::QueueEmpty) {
+        -:  453:        std::cout << "Tick " << tick_ << ": "
+        -:  454:                  << lane.name
+        -:  455:                  << " lane has a green signal but no vehicles to process.\n";
+        -:  456:    } else {
+        -:  457:        const std::size_t waitingTime =
+        -:  458:            tick_ - vehicle.arrivalTick;
+        -:  459:
+        -:  460:        ++vehiclesProcessed_;
+        -:  461:        totalWaitingTime_ += waitingTime;
+        -:  462:
+        -:  463:        std::cout << "Tick " << tick_
+        -:  464:                  << ": vehicle " << vehicle.id
+        -:  465:                  << " (" << vehicle.type
+        -:  466:                  << ") moved from the "
+        -:  467:                  << lane.name
+        -:  468:                  << " lane after waiting "
+        -:  469:                  << waitingTime << " tick(s).\n";
+        -:  470:    }
+        -:  471:
+        -:  472:    // Count how long this lane has been Green.
+        -:  473:    ++greenTicks_;
+        -:  474:
+        -:  475:    // Change to Yellow after the Green duration is complete.
+        -:  476:    if (greenTicks_ >= GREEN_DURATION_TICKS) {
+        -:  477:        lane.signalState = SignalState::Yellow;
+        -:  478:
+        -:  479:        std::cout << lane.name
+        -:  480:                  << " lane signal changed to YELLOW.\n";
+        -:  481:    }
+        -:  482:}
+        -:  483:};
+        -:  484:
+        -:  485:#ifndef TMS_UNIT_TEST
+        -:  486:int main() {
+        -:  487:    TrafficSimulation simulation;
+        -:  488:    simulation.run();
+        -:  489:    return 0;
+        -:  490:}
+        -:  491:#endif // TMS_UNIT_TEST

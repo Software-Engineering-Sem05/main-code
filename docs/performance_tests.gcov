@@ -1,0 +1,193 @@
+        -:    0:Source:tests/test_performance.cpp
+        -:    0:Graph:test_performance.gcno
+        -:    0:Data:test_performance.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:// Performance tests for NFR1 / TC-09 (issue #9).
+        -:    2:// Build and run from the repo root:
+        -:    3://   g++ -std=c++17 -O2 -Wall -Wextra -pedantic tests/test_performance.cpp -o test_performance.out
+        -:    4://   ./test_performance.out
+        -:    5://
+        -:    6:// TC-09 sets no response-time limit (the SRS does not define one), so these
+        -:    7:// tests pass on completion and correctness: no crash, hang, lost vehicle or
+        -:    8:// duplicated vehicle. Elapsed times are printed for the test plan's
+        -:    9:// "Actual Result" column.
+        -:   10:
+        -:   11:#include <chrono>
+        -:   12:#include <iostream>
+        -:   13:#include <sstream>
+        -:   14:#include <string>
+        -:   15:#include <unordered_set>
+        -:   16:#include <vector>
+        -:   17:
+        -:   18:// Pull in the classes from main.cpp without its main() function.
+        -:   19:#define TMS_UNIT_TEST
+        -:   20:#include "../main.cpp"
+        -:   21:
+        -:   22:namespace {
+        -:   23:
+        -:   24:int failures = 0;
+        -:   25:
+       11:   26:void check(bool condition, const std::string& description) {
+       11:   27:    std::cout << (condition ? "  PASS  " : "  FAIL  ") << description << '\n';
+        -:   28:
+       11:   29:    if (!condition) {
+    #####:   30:        ++failures;
+        -:   31:    }
+       11:   32:}
+        -:   33:
+        2:   34:double millisecondsSince(std::chrono::steady_clock::time_point start) {
+        2:   35:    const auto elapsed = std::chrono::steady_clock::now() - start;
+        2:   36:    return std::chrono::duration<double, std::milli>(elapsed).count();
+        -:   37:}
+        -:   38:
+        -:   39:// Component level: a large number of vehicles through the Vehicle Manager and
+        -:   40:// Queue Manager, cycling GREEN across the lanes until every queue is empty.
+        1:   41:void testComponentStress() {
+        1:   42:    const std::size_t laneCount = 4;
+        1:   43:    const std::size_t vehicleCount = 200000;
+        -:   44:
+        1:   45:    std::cout << "NFR1 component stress (" << vehicleCount << " vehicles, "
+        1:   46:              << laneCount << " lanes)\n";
+        -:   47:
+        2:   48:    QueueManager queues(laneCount);
+        1:   49:    VehicleManager vehicles(queues);
+        -:   50:
+        1:   51:    const auto start = std::chrono::steady_clock::now();
+        -:   52:
+        1:   53:    std::size_t added = 0;
+   200001:   54:    for (std::size_t i = 0; i < vehicleCount; ++i) {
+   200000:   55:        if (vehicles.addVehicle(i % laneCount, "V" + std::to_string(i), "car", 0)) {
+   200000:   56:            ++added;
+        -:   57:        }
+        -:   58:    }
+        -:   59:
+        -:   60:    // Each lane remembers the last vehicle number that left it, to confirm
+        -:   61:    // FIFO order (vehicle numbers in a lane only ever increase).
+        2:   62:    std::vector<long long> lastLeft(laneCount, -1);
+        2:   63:    std::unordered_set<std::string> departedIds;
+        1:   64:    bool fifoKept = true;
+        1:   65:    bool redBlocked = true;
+        1:   66:    std::size_t departed = 0;
+        2:   67:    Vehicle out;
+        -:   68:
+    33335:   69:    while (departed < added) {
+    83335:   70:        for (std::size_t lane = 0; lane < laneCount; ++lane) {
+        -:   71:            // Red lanes must never release a vehicle.
+    66668:   72:            if (vehicles.moveVehicle(lane, SignalState::Red, out) != MoveResult::BlockedBySignal) {
+    #####:   73:                redBlocked = false;
+        -:   74:            }
+        -:   75:
+        -:   76:            // Three vehicles per green, matching GREEN_DURATION_TICKS.
+   266668:   77:            for (int tick = 0; tick < 3; ++tick) {
+   200004:   78:                if (vehicles.moveVehicle(lane, SignalState::Green, out) != MoveResult::Moved) {
+        4:   79:                    break;
+        -:   80:                }
+        -:   81:
+   200000:   82:                const long long number = std::stoll(out.id.substr(1));
+   200000:   83:                fifoKept = fifoKept && number > lastLeft[lane];
+   200000:   84:                lastLeft[lane] = number;
+   200000:   85:                departedIds.insert(out.id);
+   200000:   86:                ++departed;
+        -:   87:            }
+        -:   88:        }
+        -:   89:    }
+        -:   90:
+        1:   91:    const double ms = millisecondsSince(start);
+        -:   92:
+        1:   93:    std::size_t stillQueued = 0;
+        5:   94:    for (std::size_t lane = 0; lane < laneCount; ++lane) {
+        4:   95:        stillQueued += queues.getQueueLength(lane);
+        -:   96:    }
+        -:   97:
+        1:   98:    check(added == vehicleCount, "all vehicles were added");
+        1:   99:    check(departed == vehicleCount, "all vehicles left their lanes");
+        1:  100:    check(departedIds.size() == vehicleCount, "no vehicle left twice (no duplicates)");
+        1:  101:    check(stillQueued == 0, "every queue is empty at the end (no lost vehicles)");
+        1:  102:    check(fifoKept, "every lane kept FIFO order");
+        1:  103:    check(redBlocked, "no vehicle ever left on RED");
+        1:  104:    std::cout << "        completed in " << ms << " ms\n";
+        1:  105:}
+        -:  106:
+        -:  107:// End to end (TC-09 steps): drive the real TrafficSimulation menu loop with
+        -:  108:// scripted input — add vehicles to all lanes, advance through many signal
+        -:  109:// cycles, and request statistics along the way.
+        1:  110:void testSimulationWorkload() {
+        1:  111:    const std::size_t vehicleCount = 20000;
+        1:  112:    const std::size_t laneCount = 4;
+        -:  113:
+        1:  114:    std::cout << "TC-09 full simulation workload (" << vehicleCount << " vehicles)\n";
+        -:  115:
+        2:  116:    std::ostringstream script;
+        -:  117:
+    20001:  118:    for (std::size_t i = 0; i < vehicleCount; ++i) {
+    20000:  119:        script << "1\n" << (i % laneCount) + 1 << "\nPV" << i << "\ncar\n";
+        -:  120:    }
+        -:  121:
+        -:  122:    // Each lane is GREEN for 3 ticks then YELLOW for 1, so one full cycle of
+        -:  123:    // 4 lanes takes 16 ticks and moves at most 12 vehicles. Allow extra ticks.
+        1:  124:    const std::size_t ticks = (vehicleCount / 12 + 1) * 16 + 64;
+        -:  125:
+    26737:  126:    for (std::size_t t = 0; t < ticks; ++t) {
+    26736:  127:        script << "3\n";
+        -:  128:
+    26736:  129:        if (t % 2000 == 0) {
+       14:  130:            script << "2\n"; // statistics / status display
+        -:  131:        }
+        -:  132:    }
+        -:  133:
+        1:  134:    script << "2\n4\n"; // final status, then exit
+        -:  135:
+        2:  136:    std::istringstream input(script.str());
+        2:  137:    std::ostringstream output;
+        -:  138:
+        1:  139:    std::streambuf* const originalIn = std::cin.rdbuf(input.rdbuf());
+        1:  140:    std::streambuf* const originalOut = std::cout.rdbuf(output.rdbuf());
+        -:  141:
+        1:  142:    const auto start = std::chrono::steady_clock::now();
+        -:  143:    {
+        2:  144:        TrafficSimulation simulation;
+        1:  145:        simulation.run();
+        -:  146:    }
+        1:  147:    const double ms = millisecondsSince(start);
+        -:  148:
+        1:  149:    std::cin.rdbuf(originalIn);
+        1:  150:    std::cout.rdbuf(originalOut);
+        -:  151:
+        2:  152:    const std::string log = output.str();
+        -:  153:    const std::string expectedTotals =
+        2:  154:        "Total vehicles added     : " + std::to_string(vehicleCount) +
+        2:  155:        "\n" +
+        4:  156:        "Total vehicles processed : " + std::to_string(vehicleCount);
+        -:  157:
+        -:  158:    const std::size_t lastStatus = log.rfind("========================================\n"
+        1:  159:        "          TRAFFIC STATUS REPORT");
+        -:  160:    const std::string finalStatus =
+        2:  161:        lastStatus == std::string::npos ? "" : log.substr(lastStatus);
+        -:  162:
+        2:  163:    check(log.find("Simulation ended.") != std::string::npos,
+        1:  164:          "simulation ran every command and exited normally (no hang)");
+        3:  165:    check(log.find("could not be queued") == std::string::npos &&
+        1:  166:              log.find("was not added") == std::string::npos,
+        1:  167:          "every vehicle was accepted");
+        2:  168:    check(finalStatus.find(expectedTotals) != std::string::npos,
+        1:  169:          "final statistics show all vehicles added and processed");
+        3:  170:    check(finalStatus.find("Vehicles     : 0") != std::string::npos &&
+        1:  171:              finalStatus.find("Queue        : Empty") != std::string::npos,
+        1:  172:          "every lane is empty at the end");
+        3:  173:    check(log.find("YELLOW") != std::string::npos &&
+        1:  174:              log.find("RED") != std::string::npos,
+        1:  175:          "signals cycled through YELLOW and RED during the run");
+        1:  176:    std::cout << "        " << ticks << " ticks completed in " << ms << " ms\n";
+        1:  177:}
+        -:  178:
+        -:  179:} // namespace
+        -:  180:
+        1:  181:int main() {
+        1:  182:    testComponentStress();
+        1:  183:    testSimulationWorkload();
+        -:  184:
+        -:  185:    std::cout << '\n'
+        1:  186:              << (failures == 0 ? "All tests passed.\n" : "Some tests failed.\n");
+        1:  187:    return failures == 0 ? 0 : 1;
+        3:  188:}
