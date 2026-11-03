@@ -10,10 +10,11 @@ The project simulates traffic flow for four lanes: North, South, East, and West.
 
 - Four independent traffic lanes
 - FIFO queue management per lane
-- Duplicate vehicle prevention and invalid-operation safeguards
+- Duplicate vehicle prevention and validation of blank vehicle IDs and types
 - Green, yellow, and red signal state handling
 - Vehicle exit enforcement through the traffic manager
 - Terminal-based menu for adding vehicles, viewing status, and advancing time
+- Congestion levels based on queue length and traffic statistics, including average waiting time
 - Automated tests covering queue and vehicle manager behavior
 
 ## Project structure
@@ -59,9 +60,13 @@ From the interactive menu, you can:
 
 - Vehicles may only join a valid lane.
 - Vehicle IDs must be unique across the entire simulation.
+- Vehicle IDs and types cannot be empty or whitespace-only.
 - Queue operations follow FIFO order.
 - A vehicle can leave its lane only when the lane signal is green.
 - Red or yellow lanes block vehicle exits and keep the queue unchanged.
+- A lane with more than five waiting vehicles is reported as highly congested.
+- The status report shows each lane's signal, queue length and contents, plus
+  total vehicles added and processed and average waiting time for processed vehicles.
 
 ## Testing
 

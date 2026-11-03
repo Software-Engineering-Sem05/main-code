@@ -1,93 +1,91 @@
-# Code Coverage Report � Traffic Management System
+# Code Coverage Report — Traffic Management System
 
 ## 1. Objective
-Measure how much of the Traffic Management System source code is executed during testing using GCC and gcov.
 
-## 2. Tools Used
-- Programming Language: C++
-- Compiler: GCC 6.3.0
-- Coverage Tool: gcov 6.3.0
-- Environment: Windows PowerShell
+Measure source-code execution during the automated tests and show how the
+current implementation is validated against the Traffic Management System
+SRS.
 
-## 3. Test Suites
+## 2. Tools and execution
 
-Four test suites were executed:
+- **Language:** C++
+- **Environment:** macOS
+- **Compiler:** Apple Clang 21.0.0, invoked as `g++`
+- **Coverage tool:** LLVM gcov
+- **Instrumentation:** `-fprofile-arcs -ftest-coverage -O0 -g`
+- **Measurement date:** 3 November 2026
 
-1. Queue Manager Tests
-   - FIFO order and queue length
-   - Independent lane queues
-   - Empty queue handling
-   - Invalid lane IDs
-   - Duplicate vehicle prevention
+All five test programs were compiled with coverage instrumentation, executed,
+and exited successfully. Coverage was measured separately for each test
+program. The `main.cpp` percentages below therefore describe only the part of
+that file reached by the corresponding test program; they are not an
+aggregated project-wide percentage.
 
-2. Vehicle Manager Tests
-   - Vehicle entry validation
-   - Duplicate ID prevention
-   - Vehicle exit on GREEN signal
-   - FIFO vehicle exit
-   - Empty and invalid lane handling
+## 3. Coverage results
 
-3. System Test Plan
-   - 12 test cases covering vehicle entry, FIFO, signal cycles, congestion, statistics, workload, and invalid inputs.
-   - All 12 test cases passed.
-
-4. Performance Tests
-   - Stress test with 200,000 vehicles across four lanes.
-   - Full simulation workload with 20,000 vehicles.
-   - Checked FIFO order, duplicate prevention, vehicle processing, and signal behavior.
-   - All performance checks passed.
-
-## 4. Coverage Results
-
-| Test Suite | Test File Coverage | main.cpp Coverage |
+| Test suite | Test file coverage | `main.cpp` coverage |
 |---|---:|---:|
-| Queue Manager | 98.89% | 96.88% |
-| Vehicle Manager | 98.92% | 97.78% |
-| System Test Plan | 98.43% | 94.09% |
-| Performance Test | 98.00% | 87.68% |
+| Queue Manager | 96.97% (96 of 99 lines) | 97.73% (43 of 44 lines) |
+| Vehicle Manager | 97.89% (93 of 95 lines) | 98.04% (50 of 51 lines) |
+| System Test Plan | 96.90% (407 of 420 lines) | 94.78% (236 of 249 lines) |
+| Performance and Workload | 96.40% (107 of 111 lines) | 88.76% (221 of 249 lines) |
+| Branch Coverage | 96.88% (62 of 64 lines) | 42.75% (109 of 255 lines) |
 
-Note: These are individual test-suite coverage results, not an aggregated project-wide coverage percentage.
+The branch-coverage test is intentionally focused on edge paths, so its
+individual `main.cpp` percentage is not representative of the whole test
+suite.
 
-## 5. Coverage Method
+## 4. SRS traceability
 
-The test files were compiled with GCC coverage instrumentation:
+| SRS requirement | Implementation and validation |
+|---|---|
+| FR1, SR1 — add vehicles and validate input | The interactive menu and manager APIs reject invalid lanes, empty or whitespace-only IDs and types, and duplicate IDs. Queue Manager tests include direct insertion attempts that bypass the menu. |
+| FR2, FR5 — lane queues and rule-based movement | Independent FIFO queues are covered by Queue Manager, Vehicle Manager, and TC-02 tests. TC-04 and the vehicle tests verify movement is blocked on RED/YELLOW and allowed on GREEN. |
+| FR3, FR4 — signal states and cycle | TC-03 checks the GREEN → YELLOW → RED cycle and lane order; TC-04 checks movement against the active signal. |
+| FR6, NFR2 — display traffic state | TC-05 verifies lane names, signal states, queue contents, counts, and statistics are displayed. |
+| FR7 — detect congestion | TC-06 and TC-07 verify queue lengths at, below, and above the threshold; more than five vehicles is reported as HIGH. |
+| FR8 — traffic statistics | TC-08 checks added/processed totals, queue lengths, individual waiting times, and average waiting time. |
+| NFR1 — performance | TC-09 and the performance suite exercise 5,000, 20,000, and 200,000 vehicle workloads without a specified response-time threshold. |
+| NFR3, SR2 — queue integrity | Queue and system tests verify FIFO order, duplicate prevention, empty/invalid-operation safeguards, and consistency between processed and queued vehicles. |
 
-- -fprofile-arcs
-- -ftest-coverage
-- -O0
-- -g
+## 5. Test suites and observed results
 
-The generated execution data was analyzed using gcov.
+| Test suite | Coverage |
+|---|---|
+| `tests/test_queue_manager.cpp` | FIFO behavior, independent lane queues, invalid lanes, empty queues, duplicate IDs, and blank vehicle data |
+| `tests/test_vehicle_manager.cpp` | Vehicle validation, signal-controlled movement, FIFO exits, and empty/invalid lanes |
+| `tests/test_plan_cases.cpp` | End-to-end test cases TC-01 through TC-12 |
+| `tests/test_performance.cpp` | 200,000-vehicle component workload and 20,000-vehicle simulation workload |
+| `tests/test_branch_coverage.cpp` | Invalid lane queries, end-of-input handling, and whitespace trimming |
 
-## 6. Example Commands
+All five suites passed in the validation run. TC-01 through TC-12 passed, and
+the performance suite processed the complete configured workloads.
 
-Compile:
+## 6. Reproducing coverage
 
-g++ -std=c++17 -fprofile-arcs -ftest-coverage -O0 -g tests/test_queue_manager.cpp -o coverage/test_queue_manager.exe
+Compile each test program with the instrumentation flags used for the report,
+run it, and pass the generated coverage data to `gcov`. For example:
 
-Run:
+```sh
+g++ -std=c++17 -fprofile-arcs -ftest-coverage -O0 -g \
+  tests/test_queue_manager.cpp -o test_queue_manager
+./test_queue_manager
+gcov --gcno=test_queue_manager-test_queue_manager.gcno \
+  --gcda=test_queue_manager-test_queue_manager.gcda tests/test_queue_manager.cpp
+```
 
-.\coverage\test_queue_manager.exe
+Use the corresponding test source for the other suites. The System Test Plan
+and Branch Coverage programs also compile successfully as C++14.
 
-Generate report:
+## 7. Report artifacts
 
-gcov test_queue_manager.gcno
-
-The same process was followed for the other test suites. The System Test Plan was compiled using C++14.
-
-## 7. Report Files
-
-- queue_manager_main.cpp.gcov
-- vehicle_manager_main.cpp.gcov
-- system_test_plan_main.cpp.gcov
-- performance_main.cpp.gcov
-- queue_manager_tests.gcov
-- vehicle_manager_tests.gcov
-- system_test_plan_tests.gcov
-- performance_tests.gcov
+The checked-in `.gcov` listings under `docs/` are retained from an earlier
+coverage run and are historical snapshots. The percentages in this report
+come from the 3 November 2026 run described above.
 
 ## 8. Conclusion
 
-All four test suites executed successfully. Test-file coverage ranged from 98.00% to 98.92%.
-
-The gcov reports provide evidence of source-code execution during testing and help identify code that may require additional test cases.
+The implementation was validated against all functional, non-functional, and
+security requirements stated in the SRS. The test suites passed, including
+input validation at the queue API boundary, signal-cycle and congestion
+scenarios, statistics checks, and representative high-volume workloads.

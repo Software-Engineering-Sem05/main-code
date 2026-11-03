@@ -15,6 +15,19 @@ struct Vehicle {
     std::size_t arrivalTick;
 };
 
+// Returns the text without leading/trailing spaces, tabs or line endings.
+inline std::string trimmed(const std::string& text) {
+    const char* const whitespace = " \t\r\n";
+    const std::size_t first = text.find_first_not_of(whitespace);
+
+    if (first == std::string::npos) {
+        return "";
+    }
+
+    const std::size_t last = text.find_last_not_of(whitespace);
+    return text.substr(first, last - first + 1);
+}
+
 // Queue Manager — Data Structure Layer (SADS §2, §4).
 //
 // Owns one FIFO queue per lane and is the only component allowed to change
@@ -38,10 +51,11 @@ public:
     }
 
     // Adds the vehicle to the back of the lane's queue.
-    // Returns false (and changes nothing) for an invalid lane, an empty ID,
-    // or a vehicle ID that has already been admitted to the system.
+    // Returns false (and changes nothing) for an invalid lane, a blank ID or
+    // type, or a vehicle ID that has already been admitted to the system.
     bool enqueue(std::size_t laneId, const Vehicle& vehicle) {
-        if (!isValidLane(laneId) || vehicle.id.empty() ||
+        if (!isValidLane(laneId) || trimmed(vehicle.id).empty() ||
+            trimmed(vehicle.type).empty() ||
             vehicleIds_.count(vehicle.id) != 0) {
             return false;
         }
@@ -104,20 +118,6 @@ enum class SignalState {
     Yellow,
     Green
 };
-
-// Returns the text without leading/trailing spaces, tabs or line endings.
-// Used so that input made only of spaces is treated as empty (SR1).
-inline std::string trimmed(const std::string& text) {
-    const char* const whitespace = " \t\r\n";
-    const std::size_t first = text.find_first_not_of(whitespace);
-
-    if (first == std::string::npos) {
-        return "";
-    }
-
-    const std::size_t last = text.find_last_not_of(whitespace);
-    return text.substr(first, last - first + 1);
-}
 
 struct Lane {
     std::string name;

@@ -125,6 +125,12 @@ void testNoDuplicates() {
           "rejecting a departed ID does not change any queue");
     check(!queues.enqueue(0, Vehicle{"", "car", 0}),
           "a vehicle with an empty ID is rejected");
+    check(!queues.enqueue(0, Vehicle{" \t ", "car", 0}),
+          "a vehicle with a whitespace-only ID is rejected");
+    check(!queues.enqueue(0, Vehicle{"D2", " \t ", 0}),
+          "a vehicle with a whitespace-only type is rejected");
+    check(queues.getQueueLength(0) == 0,
+          "rejecting blank vehicle data does not change the queue");
 }
 
 } // namespace
